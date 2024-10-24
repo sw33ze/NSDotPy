@@ -23,6 +23,7 @@ import mimetypes  # for flag and banner uploading
 # external library imports
 import keyboard  # for the required user input
 import httpx  # for http stuff
+from tendo.singleton import SingleInstance  # so it can only be run once at a time
 from bs4 import BeautifulSoup, Tag  # for parsing html and xml
 from benedict import benedict
 
@@ -78,12 +79,14 @@ class NSSession:
             link_to_src (str, optional): Link to the source code of your script.
             logger (logging.Logger | None, optional): Logger to use. Will create its own with name "NSDotPy" if none is specified. Defaults to None.
         """
-        self.VERSION = "2.3.0"
+        self.VERSION = "2.4.0"
         # Initialize logger
         if not logger:
             self._init_logger()
         else:
             self.logger = logger
+        # Attach the tendo singleton to the session object so it can only be run once at a time, avoiding simultaneity issues
+        self._me = SingleInstance()
         # Create a new httpx session
         self._session = httpx.Client(
             http2=True, timeout=30
@@ -332,26 +335,26 @@ class NSSession:
             raise ValueError(
                 "You cannot use a tool to interact with telegrams, issues, getting help, or the store. Read up on the script rules: https://forum.nationstates.net/viewtopic.php?p=16394966#p16394966"
             )
+        if self._lock:
+            # if lock is true then we're already in the middle of a
+            # request and we're in danger of breaking the simultaneity rule
+            # so raise an error
+            raise PermissionError(
+                "You're already in the middle of a request. Stop trying to violate simultaneity."
+            )
+        self._lock = True
         if "api.cgi" in canonicalize(url):
             # you should be using api_request for api requests
             raise ValueError("You should be using api_request() for api requests.")
         elif "nationstates" in canonicalize(url):
             # do all the things that need to be done for html requests
-            if self._lock:
-                # if lock is true then we're already in the middle of a
-                # request and we're in danger of breaking the simultaneity rule
-                # so raise an error
-                raise PermissionError(
-                    "You're already in the middle of a request. Stop trying to violate simultaneity."
-                )
-            self._lock = True
             response = self._html_request(url, data, files, follow_redirects)
-            self._lock = False
         else:
             # if its not nationstates then just pass the request through
             response = self._session.post(
                 url, data=data, follow_redirects=follow_redirects
             )
+        self._lock = False
         return response
 
     def api_request(
@@ -682,6 +685,7 @@ class NSSession:
         self,
         *,
         email: str = "",
+        notify: bool = False,
         pretitle: str = "",
         slogan: str = "",
         currency: str = "",
@@ -689,6 +693,9 @@ class NSSession:
         demonym_noun: str = "",
         demonym_adjective: str = "",
         demonym_plural: str = "",
+        capital: str = "",
+        leader: str = "",
+        faith: str = "",
         new_password: str = "",
     ) -> bool:
         """Given a logged in session, changes customizable fields and settings of the logged in nation.
@@ -696,6 +703,7 @@ class NSSession:
 
         Args:
             email (str, optional): New email for WA apps.
+            notify (boolean, optional): This will generate an email when the nation is about to cease to exist.
             pretitle (str, optional): New pretitle of the nation. Max length of 28. Nation must have minimum population of 250 million.
             slogan (str, optional): New Slogan/Motto of the nation. Max length of 55.
             currency (str, optional): New currency of the nation. Max length of 40.
@@ -703,6 +711,9 @@ class NSSession:
             demonym_noun (str, optional): Noun the nation will refer to its citizens as. Max length of 44.
             demonym_adjective (str, optional): Adjective the nation will refer to its citizens as. Max length of 44.
             demonym_plural (str, optional): Plural form of "demonym_noun". Max length of 44.
+            capital (str, optional): New capital city of the nation. Max length of 40.
+            leader (str, optional): New leader of the nation. Max length of 40.
+            faith (str, optional):New faith for nation. Max length of 40. 
             new_password (str, optional): New password to assign to the nation.
 
         Returns:
@@ -712,6 +723,7 @@ class NSSession:
         url = "https://www.nationstates.net/template-overall=none/page=settings"
 
         data = {
+            "email": email,
             "type": pretitle,
             "slogan": slogan,
             "currency": currency,
@@ -719,7 +731,10 @@ class NSSession:
             "demonym2": demonym_noun,
             "demonym": demonym_adjective,
             "demonym2pl": demonym_plural,
-            "email": email,
+            "capital": capital,
+            "leader": leader,
+            "faith":faith,
+            "email_notify": "on" if notify else "off",  
             "password": new_password,
             "confirm_password": new_password,
             "update": " Update ",
