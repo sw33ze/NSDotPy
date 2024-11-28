@@ -278,7 +278,7 @@ class NSSession:
         userclick = self._wait_for_input(self.keybind)
         # userclick is the number of milliseconds since the epoch, admin uses this for help enforcing the simultaneity rule
         response = self._session.post(
-            f"{url}/userclick={userclick}",
+            f"{url}?userclick={userclick}",
             data=data,
             files=files,
             follow_redirects=follow_redirects,
